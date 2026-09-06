@@ -596,7 +596,8 @@ class ReservationStation[T <: Data : Arithmetic, U <: Data, V <: Data](config: G
 
   if (use_firesim_simulation_counters) {
     PerfCounter(io.busy, "reservation_station_busy", "cycles where reservation station has entries")
-    PerfCounter(!io.alloc.ready, "reservation_station_full", "cycles where reservation station is full")
+    //PerfCounter(!io.alloc.ready, "reservation_station_full", "cycles where reservation station is full")
+    PerfCounter(io.alloc.valid && !io.alloc.ready, "reservation_station_full", "cycles where reservation station is full")
   }
 
   when (reset.asBool) {
@@ -608,5 +609,6 @@ class ReservationStation[T <: Data : Arithmetic, U <: Data, V <: Data](config: G
   io.counter.connectExternalCounter(CounterExternal.RESERVATION_STATION_ST_COUNT, utilization_st_q)
   io.counter.connectExternalCounter(CounterExternal.RESERVATION_STATION_EX_COUNT, utilization_ex_q)
   io.counter.connectEventSignal(CounterEvent.RESERVATION_STATION_ACTIVE_CYCLES, io.busy)
-  io.counter.connectEventSignal(CounterEvent.RESERVATION_STATION_FULL_CYCLES, !io.alloc.ready)
+  //io.counter.connectEventSignal(CounterEvent.RESERVATION_STATION_FULL_CYCLES, !io.alloc.ready)
+  io.counter.connectEventSignal(CounterEvent.RESERVATION_STATION_FULL_CYCLES, io.alloc.valid && !io.alloc.ready)
 }

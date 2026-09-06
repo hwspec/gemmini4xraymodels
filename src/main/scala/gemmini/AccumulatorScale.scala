@@ -69,6 +69,8 @@ class AccScalePipe[T <: Data, U <: Data](t: T, rDataType: Vec[Vec[T]], scale_fun
       AccumulatorScale.igelu(e, io.in.bits.igelu_qb, io.in.bits.igelu_qc),
     (has_nonlinear_activations.B && has_normalizations.B && act === Activation.SOFTMAX) ->
       AccumulatorScale.iexp(e - io.in.bits.max, io.in.bits.iexp_qln2, io.in.bits.iexp_qln2_inv, io.in.bits.igelu_qb, io.in.bits.igelu_qc),
+    (has_nonlinear_activations.B && has_normalizations.B && act === Activation.ITANH) ->
+      AccumulatorScale.igelu(e, io.in.bits.igelu_qb, io.in.bits.igelu_qc),
   ) else Seq(
     (has_nonlinear_activations.B && act === Activation.RELU) -> e.relu
   ))
@@ -124,6 +126,8 @@ class AccumulatorScale[T <: Data, U <: Data](
           AccumulatorScale.igelu(e, igelu_qb, igelu_qc),
         (has_nonlinear_activations.B && has_normalizations.B && act === Activation.SOFTMAX) ->
           AccumulatorScale.iexp(e - io.in.bits.max, iexp_qln2, iexp_qln2_inv, igelu_qb, igelu_qc),
+        (has_nonlinear_activations.B && has_normalizations.B && act === Activation.ITANH) ->
+          AccumulatorScale.igelu(e, igelu_qb, igelu_qc),
       ) else Seq(
         (has_nonlinear_activations.B && act === Activation.RELU) -> e.relu
       ))
@@ -204,6 +208,7 @@ class AccumulatorScale[T <: Data, U <: Data](
       (r.bits.acc_read_resp.act === Activation.SOFTMAX) ||
       (r.bits.acc_read_resp.act === Activation.LAYERNORM) ||
       (r.bits.acc_read_resp.act === Activation.IGELU)
+      (r.bits.acc_read_resp.act === Activation.ITANH)
     ))
 
     // input: norm_mask

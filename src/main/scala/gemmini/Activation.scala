@@ -8,6 +8,7 @@ object Activation {
   val LAYERNORM = 2.U
   val IGELU = 3.U
   val SOFTMAX = 4.U
+  val ITANH = 5.U
 
   val bitwidth = 3
 }

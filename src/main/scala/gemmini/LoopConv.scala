@@ -845,7 +845,7 @@ class LoopConvStReq(val coreMaxAddrBits: Int, val large_iterator_bitwidth: Int, 
   val addr_start = UInt(log2Up(max_acc_addr).W)
   val dram_addr = UInt(coreMaxAddrBits.W)
   val no_pool = Bool()
-  val activation = UInt(2.W) // TODO magic number
+  val activation = UInt(3.W) // TODO magic number
   val trans_output_1203 = Bool()
   val loop_id = UInt(log2Up(concurrent_loops).W)
 }
@@ -1364,7 +1364,7 @@ class LoopConv (block_size: Int, coreMaxAddrBits: Int, reservation_station_size:
         loop_being_configured.dw := has_dw_convs.B && cmd.bits.cmd.rs1(6)
 
         loop_being_configured.no_pool := !has_max_pool.B || cmd.bits.cmd.rs2(0)
-        loop_being_configured.activation := cmd.bits.cmd.rs2(4,3)
+        loop_being_configured.activation := cmd.bits.cmd.rs2(5,3)
 
         loop_being_configured.downsample := cmd.bits.cmd.rs2(1)
 

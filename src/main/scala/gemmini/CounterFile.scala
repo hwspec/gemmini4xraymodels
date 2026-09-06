@@ -69,8 +69,9 @@ object CounterEvent {
 
   val LOOP_MATMUL_ACTIVE_CYCLES = 43
   val TRANSPOSE_PRELOAD_UNROLLER_ACTIVE_CYCLES = 44
+  val LOOP_CONV_ACTIVE_CYCLES = 45
 
-  val n = 45
+  val n = 46
 }
 
 object CounterExternal {

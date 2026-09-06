@@ -269,6 +269,7 @@ class GemminiModule[T <: Data: Arithmetic, U <: Data, V <: Data]
   val unrolled_cmd = Queue(loop_cmd)
   unrolled_cmd.ready := false.B
   counters.io.event_io.connectEventSignal(CounterEvent.LOOP_MATMUL_ACTIVE_CYCLES, loop_matmul_unroller_busy)
+  counters.io.event_io.connectEventSignal(CounterEvent.LOOP_CONV_ACTIVE_CYCLES, loop_conv_unroller_busy)
 
   // Wire up controllers to ROB
   reservation_station.io.alloc.valid := false.B
