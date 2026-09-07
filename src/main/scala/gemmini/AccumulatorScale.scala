@@ -70,7 +70,7 @@ class AccScalePipe[T <: Data, U <: Data](t: T, rDataType: Vec[Vec[T]], scale_fun
     (has_nonlinear_activations.B && has_normalizations.B && act === Activation.SOFTMAX) ->
       AccumulatorScale.iexp(e - io.in.bits.max, io.in.bits.iexp_qln2, io.in.bits.iexp_qln2_inv, io.in.bits.igelu_qb, io.in.bits.igelu_qc),
     (has_nonlinear_activations.B && has_normalizations.B && act === Activation.ITANH) ->
-      AccumulatorScale.igelu(e, io.in.bits.igelu_qb, io.in.bits.igelu_qc),
+      AccumulatorScale.itanh(e, io.in.bits.igelu_qb, io.in.bits.igelu_qc),
   ) else Seq(
     (has_nonlinear_activations.B && act === Activation.RELU) -> e.relu
   ))
@@ -127,7 +127,7 @@ class AccumulatorScale[T <: Data, U <: Data](
         (has_nonlinear_activations.B && has_normalizations.B && act === Activation.SOFTMAX) ->
           AccumulatorScale.iexp(e - io.in.bits.max, iexp_qln2, iexp_qln2_inv, igelu_qb, igelu_qc),
         (has_nonlinear_activations.B && has_normalizations.B && act === Activation.ITANH) ->
-          AccumulatorScale.igelu(e, igelu_qb, igelu_qc),
+          AccumulatorScale.itanh(e, igelu_qb, igelu_qc),
       ) else Seq(
         (has_nonlinear_activations.B && act === Activation.RELU) -> e.relu
       ))
@@ -207,7 +207,7 @@ class AccumulatorScale[T <: Data, U <: Data](
     val norm_mask = regs.map(r => r.valid && (
       (r.bits.acc_read_resp.act === Activation.SOFTMAX) ||
       (r.bits.acc_read_resp.act === Activation.LAYERNORM) ||
-      (r.bits.acc_read_resp.act === Activation.IGELU)
+      (r.bits.acc_read_resp.act === Activation.IGELU) ||
       (r.bits.acc_read_resp.act === Activation.ITANH)
     ))
 
@@ -392,6 +392,22 @@ object AccumulatorScale {
     val q_poly = qc.mac(q_clipped + qb, q_clipped + qb).withWidthOf(q)
     val q_erf = (q_sign * q_poly).withWidthOf(q)
     (q * (q_erf + qc)).withWidthOf(q)
+  }
+
+  def itanh[T <: Data](q: T, qb: T, qc: T)(implicit ev: Arithmetic[T]): T = {
+    import ev._
+
+    val zero = q.zero
+    val one = q.identity
+    def neg(x: T) = zero-x
+
+    val q_sign = Mux(q.zero > q, neg(one), one)
+    val q_abs = Mux(q.zero > q, neg(q), q)
+    val q_clipped = Mux(q_abs > neg(qb), neg(qb), q_abs)
+    //val q_poly = qc.mac(q_clipped + qb, q_clipped + qb).withWidthOf(q)
+    //val q_erf = (q_sign * q_poly).withWidthOf(q)
+    val q_sq_c = ((q_clipped + qb) * (q_clipped + qb) + qc).withWidthOf(q)
+    (q_sign * q_sq_c).withWidthOf(q)
   }
 
   def iexp[T <: Data](q: T, qln2: T, qln2_inv: T, qb: T, qc: T)(implicit ev: Arithmetic[T]): T = {
