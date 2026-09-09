@@ -233,7 +233,7 @@ class StoreController[T <: Data : Arithmetic, U <: Data, V <: Data](config: Gemm
         when(DoConfig) {
           stride := config_stride
 
-          activation := config_activation
+          activation := Cat(activation(Activation.bitwidth - 1), config_activation)
           when (!config_acc_scale.asUInt.andR) {
             acc_scale := config_acc_scale.asTypeOf(acc_scale_t)
           }
