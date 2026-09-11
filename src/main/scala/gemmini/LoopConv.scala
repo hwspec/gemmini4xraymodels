@@ -1072,7 +1072,7 @@ class LoopConvState(val block_size: Int, val large_iterator_bitwidth: Int, val s
   val no_pool = Bool()
   val downsample = Bool()
   val input_dilated = Bool()
-  val activation = UInt(2.W) // TODO magic number
+  val activation = UInt(Activation.bitwidth.W)
   val trans_output_1203 = Bool()
   val trans_weight_1203 = Bool()
   val trans_weight_0132 = Bool()

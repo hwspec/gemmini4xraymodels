@@ -56,7 +56,8 @@ object GemminiCustomConfigs {
     sp_singleported = false,
     spad_read_delay = 8,
     use_shared_ext_mem = true,
-    acc_sub_banks = 1
+    acc_sub_banks = 1,
+    has_normalizations = true
   )
 
   // Specify which of your custom configs you want to build here
