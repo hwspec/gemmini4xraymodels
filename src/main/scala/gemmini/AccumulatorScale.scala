@@ -152,7 +152,9 @@ class AccumulatorScale[T <: Data, U <: Data](
     val stage1_reg = Pipeline(in1, 1)
 
     val act2 = stage1_reg.bits.orig.acc_read_resp.act
-    val igelu_qc2 = stage1_reg.bits.orig.acc_read_resp.igelu_qc
+    val igelu_qc_lo2 = stage1_reg.bits.orig.acc_read_resp.igelu_qc_lo
+    val igelu_qc_hi2 = stage1_reg.bits.orig.acc_read_resp.igelu_qc_hi
+    val igelu_qc_wide2 = Cat(igelu_qc_hi2.asUInt, igelu_qc_lo2.asUInt).asSInt
     val scale2 = stage1_reg.bits.orig.acc_read_resp.scale
 
     val activated_data = VecInit(stage1_reg.bits.stage1.map(v => VecInit(v.map { s =>
@@ -161,11 +163,11 @@ class AccumulatorScale[T <: Data, U <: Data](
         (has_nonlinear_activations.B && has_normalizations.B && act2 === Activation.LAYERNORM) ->
           (s.q - stage1_reg.bits.orig.mean),
         (has_nonlinear_activations.B && has_normalizations.B && act2 === Activation.IGELU) ->
-          AccumulatorScale.igelu_stage2(s.q, s.q_sign, s.base, igelu_qc2),
+          AccumulatorScale.igelu_stage2(s.q, s.q_sign, s.base, igelu_qc_wide2),
         (has_nonlinear_activations.B && has_normalizations.B && act2 === Activation.SOFTMAX) ->
-          AccumulatorScale.iexp_stage2(s.q, s.q_sign, s.base, igelu_qc2),
+          AccumulatorScale.iexp_stage2(s.q, s.q_sign, s.base, igelu_qc_wide2),
         (has_nonlinear_activations.B && has_normalizations.B && act2 === Activation.ITANH) ->
-          AccumulatorScale.itanh_stage2(s.q, s.q_sign, s.base, igelu_qc2),
+          AccumulatorScale.itanh_stage2(s.q, s.q_sign, s.base, igelu_qc_wide2),
       ) else Seq(
         (has_nonlinear_activations.B && act2 === Activation.RELU) -> s.q.relu
       ))
@@ -303,7 +305,7 @@ class AccumulatorScale[T <: Data, U <: Data](
         input.bits.scale  := acc_read_resp.scale
         input.bits.act    := acc_read_resp.act
         input.bits.igelu_qb := acc_read_resp.igelu_qb
-        input.bits.igelu_qc := acc_read_resp.igelu_qc
+        input.bits.igelu_qc := acc_read_resp.igelu_qc_lo
         input.bits.iexp_qln2 := acc_read_resp.iexp_qln2
         input.bits.iexp_qln2_inv := acc_read_resp.iexp_qln2_inv
         input.bits.mean := regs(i).bits.mean
@@ -463,24 +465,32 @@ object AccumulatorScale {
   }
 
   // Stage 2
-  def igelu_stage2[T <: Data](q: T, q_sign: T, base: T, qc: T)(implicit ev: Arithmetic[T]): T = {
+  def igelu_stage2[T <: Data](q: T, q_sign: T, base: T, qc: SInt)(implicit ev: Arithmetic[T]): T = {
     import ev._
 
-    val q_poly = qc.mac(base, base).withWidthOf(q)
+    //val q_poly = qc.mac(base, base).withWidthOf(q)
+    val base_s = base.asInstanceOf[SInt]
+    val poly_wide: SInt = base_s * base_s + qc
+    val q_poly = poly_wide.asTypeOf(q)
     val q_erf = (q_sign * q_poly).withWidthOf(q)
-    (q * (q_erf + qc)).withWidthOf(q)
+    val combined_wide: SInt = q_erf.asInstanceOf[SInt] + qc
+    val combined: T = combined_wide.asTypeOf(q)
+    (q * combined).withWidthOf(q)
   }
 
   // Stage 2
-  def itanh_stage2[T <: Data](q: T, q_sign: T, base: T, qc: T)(implicit ev: Arithmetic[T]): T = {
+  def itanh_stage2[T <: Data](q: T, q_sign: T, base: T, qc: SInt)(implicit ev: Arithmetic[T]): T = {
     import ev._
 
-    val q_sq_c = (base * base + qc).withWidthOf(q)
+    //val q_sq_c = (base * base + qc).withWidthOf(q)
+    val base_s = base.asInstanceOf[SInt]
+    val q_sq_c_wide: SInt = base_s * base_s + qc
+    val q_sq_c = q_sq_c_wide.asTypeOf(q)
     (q_sign * q_sq_c).withWidthOf(q)
   }
 
   // Stage 2
-  def iexp_stage2[T <: Data](q: T, q_sign: T, base: T, qc: T)(implicit ev: Arithmetic[T]): T =
+  def iexp_stage2[T <: Data](q: T, q_sign: T, base: T, qc: SInt)(implicit ev: Arithmetic[T]): T =
     igelu_stage2(q, q_sign, base, qc)
 
   def iexp[T <: Data](q: T, qln2: T, qln2_inv: T, qb: T, qc: T)(implicit ev: Arithmetic[T]): T = {

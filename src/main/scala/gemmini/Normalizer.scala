@@ -340,7 +340,7 @@ class Normalizer[T <: Data, U <: Data](max_len: Int, num_reduce_lanes: Int, num_
     iexp_const.qln2 := io.in.bits.acc_read_resp.iexp_qln2.asTypeOf(iexp_const.qln2)
     iexp_const.qln2_inv := io.in.bits.acc_read_resp.iexp_qln2_inv.asTypeOf(iexp_const.qln2_inv)
     iexp_const.qb := io.in.bits.acc_read_resp.igelu_qb.asTypeOf(iexp_const.qb)
-    iexp_const.qc := io.in.bits.acc_read_resp.igelu_qc.asTypeOf(iexp_const.qc)
+    iexp_const.qc := io.in.bits.acc_read_resp.igelu_qc_lo.asTypeOf(iexp_const.qc)
 
     lanes.io.ins.bits.cmd := stat.cmd
     lanes.io.ins.bits.len := len

@@ -470,7 +470,8 @@ class ExecuteController[T <: Data, U <: Data, V <: Data](xLen: Int, tagWidth: In
       io.acc.read_req(i).bits.scale := acc_scale
       io.acc.read_req(i).bits.full := false.B
       io.acc.read_req(i).bits.igelu_qb := DontCare
-      io.acc.read_req(i).bits.igelu_qc := DontCare
+      io.acc.read_req(i).bits.igelu_qc_lo := DontCare
+      io.acc.read_req(i).bits.igelu_qc_hi := DontCare
       io.acc.read_req(i).bits.iexp_qln2 := DontCare
       io.acc.read_req(i).bits.iexp_qln2_inv := DontCare
       io.acc.read_req(i).bits.act := activation
@@ -490,7 +491,8 @@ class ExecuteController[T <: Data, U <: Data, V <: Data](xLen: Int, tagWidth: In
       io.acc.read_req(i).bits.scale := DontCare
       io.acc.read_req(i).bits.full := false.B
       io.acc.read_req(i).bits.igelu_qb := DontCare
-      io.acc.read_req(i).bits.igelu_qc := DontCare
+      io.acc.read_req(i).bits.igelu_qc_lo := DontCare
+      io.acc.read_req(i).bits.igelu_qc_hi := DontCare
       io.acc.read_req(i).bits.iexp_qln2 := DontCare
       io.acc.read_req(i).bits.iexp_qln2_inv := DontCare
       io.acc.read_req(i).bits.act := DontCare

@@ -36,7 +36,8 @@ class ScratchpadMemWriteRequest(local_addr_t: LocalAddr, acc_t_bits: Int, scale_
   val acc_act = UInt(Activation.bitwidth.W) // TODO don't use a magic number for the width here
   val acc_scale = UInt(scale_t_bits.W)
   val acc_igelu_qb = UInt(acc_t_bits.W)
-  val acc_igelu_qc = UInt(acc_t_bits.W)
+  val acc_igelu_qc_lo = UInt(acc_t_bits.W)
+  val acc_igelu_qc_hi = UInt(acc_t_bits.W)
   val acc_iexp_qln2 = UInt(acc_t_bits.W)
   val acc_iexp_qln2_inv = UInt(acc_t_bits.W)
   val acc_norm_stats_id = UInt(8.W) // TODO magic number
@@ -723,7 +724,8 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T, 
           bio.read.req.bits.addr := ex_read_req.bits.addr
           bio.read.req.bits.act := ex_read_req.bits.act
           bio.read.req.bits.igelu_qb := ex_read_req.bits.igelu_qb
-          bio.read.req.bits.igelu_qc := ex_read_req.bits.igelu_qc
+          bio.read.req.bits.igelu_qc_lo := ex_read_req.bits.igelu_qc_lo
+          bio.read.req.bits.igelu_qc_hi := ex_read_req.bits.igelu_qc_hi
           bio.read.req.bits.iexp_qln2 := ex_read_req.bits.iexp_qln2
           bio.read.req.bits.iexp_qln2_inv := ex_read_req.bits.iexp_qln2_inv
           bio.read.req.bits.scale := ex_read_req.bits.scale
@@ -734,7 +736,8 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T, 
           bio.read.req.bits.full := write_dispatch_q.bits.laddr.read_full_acc_row
           bio.read.req.bits.act := write_dispatch_q.bits.acc_act
           bio.read.req.bits.igelu_qb := write_dispatch_q.bits.acc_igelu_qb.asTypeOf(bio.read.req.bits.igelu_qb)
-          bio.read.req.bits.igelu_qc := write_dispatch_q.bits.acc_igelu_qc.asTypeOf(bio.read.req.bits.igelu_qc)
+          bio.read.req.bits.igelu_qc_lo := write_dispatch_q.bits.acc_igelu_qc_lo.asTypeOf(bio.read.req.bits.igelu_qc_lo)
+          bio.read.req.bits.igelu_qc_hi := write_dispatch_q.bits.acc_igelu_qc_hi.asTypeOf(bio.read.req.bits.igelu_qc_hi)
           bio.read.req.bits.iexp_qln2 := write_dispatch_q.bits.acc_iexp_qln2.asTypeOf(bio.read.req.bits.iexp_qln2)
           bio.read.req.bits.iexp_qln2_inv := write_dispatch_q.bits.acc_iexp_qln2_inv.asTypeOf(bio.read.req.bits.iexp_qln2_inv)
           bio.read.req.bits.scale := write_dispatch_q.bits.acc_scale.asTypeOf(bio.read.req.bits.scale)

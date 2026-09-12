@@ -44,7 +44,8 @@ class StoreController[T <: Data : Arithmetic, U <: Data, V <: Data](config: Gemm
 
   val activation = RegInit(0.U(Activation.bitwidth.W)) // TODO magic number
   val igelu_qb = RegInit(0.U.asTypeOf(accType))
-  val igelu_qc = RegInit(0.U.asTypeOf(accType))
+  val igelu_qc_lo = RegInit(0.U.asTypeOf(accType))
+  val igelu_qc_hi = RegInit(0.U.asTypeOf(accType))
   val iexp_qln2 = RegInit(0.U.asTypeOf(accType))
   val iexp_qln2_inv = RegInit(0.U.asTypeOf(accType))
   val norm_stats_id = RegInit(0.U(8.W)) // TODO magic number
@@ -172,7 +173,8 @@ class StoreController[T <: Data : Arithmetic, U <: Data, V <: Data](config: Gemm
 
   io.dma.req.bits.acc_act := activation
   io.dma.req.bits.acc_igelu_qb := igelu_qb.asTypeOf(io.dma.req.bits.acc_igelu_qb)
-  io.dma.req.bits.acc_igelu_qc := igelu_qc.asTypeOf(io.dma.req.bits.acc_igelu_qc)
+  io.dma.req.bits.acc_igelu_qc_lo := igelu_qc_lo.asTypeOf(io.dma.req.bits.acc_igelu_qc_lo)
+  io.dma.req.bits.acc_igelu_qc_hi := igelu_qc_hi.asTypeOf(io.dma.req.bits.acc_igelu_qc_hi)
   io.dma.req.bits.acc_iexp_qln2 := iexp_qln2.asTypeOf(io.dma.req.bits.acc_iexp_qln2)
   io.dma.req.bits.acc_iexp_qln2_inv := iexp_qln2_inv.asTypeOf(io.dma.req.bits.acc_iexp_qln2_inv)
   io.dma.req.bits.acc_norm_stats_id := norm_stats_id
@@ -258,8 +260,11 @@ class StoreController[T <: Data : Arithmetic, U <: Data, V <: Data](config: Gemm
         .elsewhen(config.has_normalizations.B && DoConfigNorm) {
           when (!config_set_stats_id_only.asBool) {
             igelu_qb := config_igelu_qb.asTypeOf(igelu_qb)
-            igelu_qc := config_igelu_qc.asTypeOf(igelu_qc)
-            when(config_iexp_q_const_type === 0.U) {
+            igelu_qc_lo := config_igelu_qc.asTypeOf(igelu_qc_lo)
+            when(config_iexp_q_const_type === 2.U) {
+              iexp_qln2 := config_iexp_q_const.asTypeOf(iexp_qln2)
+              igelu_qc_hi := config_iexp_q_const.asTypeOf(igelu_qc_hi)
+            }.elsewhen(config_iexp_q_const_type === 0.U) {
               iexp_qln2 := config_iexp_q_const.asTypeOf(iexp_qln2)
             }.elsewhen(config_iexp_q_const_type === 1.U) {
               iexp_qln2_inv := config_iexp_q_const.asTypeOf(iexp_qln2_inv)
@@ -313,7 +318,8 @@ class StoreController[T <: Data : Arithmetic, U <: Data, V <: Data](config: Gemm
     current_localaddr.norm_cmd := NormCmd.RESET
 
     igelu_qb := DontCare
-    igelu_qc := DontCare
+    igelu_qc_lo := DontCare
+    igelu_qc_hi := DontCare
     iexp_qln2 := DontCare
     iexp_qln2_inv := DontCare
     norm_stats_id := 0.U
