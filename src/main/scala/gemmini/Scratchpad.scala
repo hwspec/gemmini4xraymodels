@@ -494,6 +494,12 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T, 
     io.busy := writer.module.io.busy || spad_writer.map(_.module.io.busy).getOrElse(false.B) || reader.module.io.busy ||
       write_issue_q.io.deq.valid || write_norm_q.io.deq.valid || write_scale_q.io.deq.valid || write_dispatch_q.valid
 
+    val local_dest_addr = write_issue_q.io.deq.bits.vaddr.asTypeOf(local_addr_t)
+    val local_spad_dest = write_issue_q.io.deq.valid && writeData.valid &&
+      write_issue_q.io.deq.bits.dest.asBool
+    assert(!(local_spad_dest && local_dest_addr.is_acc_addr),
+      "on-chip local write-back to the accumulator is not supported; only SPAD destinations are")
+
     val spad_mems = {
       val banks = Seq.fill(sp_banks) { Module(new ScratchpadBank(
         sp_bank_entries, spad_w,
@@ -586,7 +592,8 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T, 
           !((mvin_scale_pixel_repeater.io.resp.valid && mvin_scale_pixel_repeater.io.resp.bits.last) || (mvin_scale_acc_out.valid && mvin_scale_acc_out.bits.last)) &&
           bio.write.ready
 
-        bio.write.valid := exwrite || dmaread || zerowrite
+        val localwrite = local_spad_dest && local_dest_addr.sp_bank() === i.U
+        bio.write.valid := exwrite || dmaread || zerowrite || localwrite
 
         when (exwrite) {
           bio.write.addr := io.srams.write(i).addr
@@ -604,6 +611,10 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T, 
           bio.write.mask := zero_writer_pixel_repeater.io.resp.bits.mask
 
           zero_writer_pixel_repeater.io.resp.ready := true.B // TODO we combinationally couple valid and ready signals
+        }.elsewhen (localwrite) {
+          bio.write.addr := local_dest_addr.sp_row()
+          bio.write.data := writeData.bits
+          bio.write.mask := VecInit(Seq.fill(bio.write.mask.length)(true.B)).asUInt.asBools
         }.otherwise {
           bio.write.addr := DontCare
           bio.write.data := DontCare
@@ -611,6 +622,12 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T, 
         }
       }
       banks
+    }
+
+    val spad_write_readies = VecInit(spad_mems.map(_.io.write.ready))
+    when (local_spad_dest) {
+      write_issue_q.io.deq.ready :=
+        spad_write_readies(local_dest_addr.sp_bank()) && writeData.valid
     }
 
     val acc_row_t = Vec(meshColumns, Vec(tileColumns, accType))
