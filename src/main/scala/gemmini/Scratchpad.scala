@@ -589,7 +589,11 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T, 
 
         bio.write.valid := exwrite || dmaread || zerowrite
 
-        when (exwrite) {
+        when (localwrite) {
+          bio.write.addr := local_dest_addr.sp_row()
+          bio.write.data := writeData.bits
+          bio.write.mask := VecInit(Seq.fill(bio.write.mask.length)(true.B)).asUInt.asBools
+        }.elsewhen (exwrite) {
           bio.write.addr := io.srams.write(i).addr
           bio.write.data := io.srams.write(i).data
           bio.write.mask := io.srams.write(i).mask
