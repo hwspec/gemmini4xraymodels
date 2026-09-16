@@ -615,6 +615,7 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T, 
           bio.write.addr := local_dest_addr.sp_row()
           bio.write.data := writeData.bits
           bio.write.mask := VecInit(Seq.fill(bio.write.mask.length)(true.B)).asUInt.asBools
+          write_issue_q.io.deq.ready := bio.write.ready && writeData.valid
         }.otherwise {
           bio.write.addr := DontCare
           bio.write.data := DontCare
@@ -622,12 +623,6 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T, 
         }
       }
       banks
-    }
-
-    val spad_write_readies = VecInit(spad_mems.map(_.io.write.ready))
-    when (local_spad_dest) {
-      write_issue_q.io.deq.ready :=
-        spad_write_readies(local_dest_addr.sp_bank()) && writeData.valid
     }
 
     val acc_row_t = Vec(meshColumns, Vec(tileColumns, accType))
