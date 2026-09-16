@@ -616,6 +616,11 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T, 
           bio.write.data := writeData.bits
           bio.write.mask := VecInit(Seq.fill(bio.write.mask.length)(true.B)).asUInt.asBools
           write_issue_q.io.deq.ready := bio.write.ready && writeData.valid
+
+          when (bio.write.fire) {
+            io.dma.write.resp.valid := true.B
+            io.dma.write.resp.bits.cmd_id := write_issue_q.io.deq.bits.cmd_id
+          }
         }.otherwise {
           bio.write.addr := DontCare
           bio.write.data := DontCare
@@ -756,7 +761,9 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T, 
             write_dispatch_q.ready := true.B
             write_norm_q.io.enq.valid := true.B
 
-            io.dma.write.resp.valid := true.B
+            when (!write_dispatch_q.bits.dest.asBool) {
+              io.dma.write.resp.valid := true.B // only ack early in case the dest is DRAM
+            }
           }
         }.otherwise {
           bio.read.req.bits := DontCare
