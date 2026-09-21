@@ -197,6 +197,10 @@ class StoreController[T <: Data : Arithmetic, U <: Data, V <: Data](config: Gemm
 
   val cmd_id = RegEnableThru(cmd_tracker.io.alloc.bits.cmd_id, cmd_tracker.io.alloc.fire()) // TODO is this really better than a simple RegEnable?
   io.dma.req.bits.cmd_id := cmd_id
+when (cmd_tracker.io.alloc.fire()) {  
+  printf("store alloc: cmd_id=%d, dst_is_spad=%d, bytes_to_read=%d\n",  
+    cmd_tracker.io.alloc.bits.cmd_id, dst_is_spad, cmd_tracker.io.alloc.bits.bytes_to_read)  
+}
 
   io.completed.valid := cmd_tracker.io.cmd_completed.valid
   io.completed.bits := cmd_tracker.io.cmd_completed.bits.tag.rob_id

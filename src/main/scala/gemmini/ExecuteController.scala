@@ -1006,7 +1006,7 @@ class ExecuteController[T <: Data, U <: Data, V <: Data](xLen: Int, tagWidth: In
   io.counter.connectEventSignal(CounterEvent.EXE_CONTROL_Q_BLOCK_CYCLE,
     !mesh_cntl_signals_q.io.enq.ready && mesh_cntl_signals_q.io.enq.valid)
   io.counter.connectEventSignal(CounterEvent.EXE_PRELOAD_HAZ_CYCLE,
-    cmd.valid(0) && DoPreloads(0) && cmd.valid(1) && raw_hazard_pre)
+    cmd.valid(0) && DoPreloads(0) && cmd.valid(1) && raw_hazard_pre) // TODO: add preload performance counters
   io.counter.connectEventSignal(CounterEvent.EXE_OVERLAP_HAZ_CYCLE,
     cmd.valid(0) && DoPreloads(1) && cmd.valid(1) && DoComputes(0) && cmd.valid(2) && raw_hazard_mulpre)
   io.counter.connectEventSignal(CounterEvent.A_GARBAGE_CYCLES, cntl.a_garbage)

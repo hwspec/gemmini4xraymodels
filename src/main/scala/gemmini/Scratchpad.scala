@@ -500,6 +500,28 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T, 
     assert(!(local_spad_dest && local_dest_addr.is_acc_addr),
       "on-chip local write-back to the accumulator is not supported; only SPAD destinations are")
 
+    // Pipeline stage between the write_issue_q/read-data path and the SRAM bank write port, to break the long
+    // combinational path (SRAM read resp / acc scale out -> bank write -> write_issue_q deq)
+    val local_stage_valid = RegInit(false.B)
+    val local_stage_addr = Reg(local_addr_t)
+    val local_stage_data = Reg(UInt((spad_w max acc_w).W))
+    val local_stage_cmd_id = Reg(write_issue_q.io.deq.bits.cmd_id.cloneType)
+    val local_stage_fire = WireDefault(false.B)
+    val local_stage_ready = !local_stage_valid || local_stage_fire
+
+    when (local_stage_fire) {
+      local_stage_valid := false.B
+    }
+    when (local_spad_dest) {
+      write_issue_q.io.deq.ready := local_stage_ready && writeData.valid
+    }
+    when (local_spad_dest && local_stage_ready) {
+      local_stage_valid := true.B
+      local_stage_addr := local_dest_addr
+      local_stage_data := writeData.bits
+      local_stage_cmd_id := write_issue_q.io.deq.bits.cmd_id
+    }
+
     val spad_mems = {
       val banks = Seq.fill(sp_banks) { Module(new ScratchpadBank(
         sp_bank_entries, spad_w,
@@ -560,6 +582,7 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T, 
 
         dma_read_pipe.io.deq.ready := writer.module.io.req.ready &&
           spad_writer.map(_.module.io.req.ready).getOrElse(true.B) &&
+          (!write_issue_q.io.deq.bits.dest.asBool || local_stage_ready) &&
           (!write_issue_q.io.deq.bits.laddr.is_acc_addr && write_issue_q.io.deq.bits.laddr.sp_bank() === i.U && // I believe we don't need to check that write_issue_q is valid here, because if the SRAM's resp is valid, then that means that the write_issue_q's deq should also be valid
           write_issue_q.io.deq.valid) && !write_issue_q.io.deq.bits.laddr.is_garbage()
         when (dma_read_pipe.io.deq.fire) {
@@ -592,7 +615,7 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T, 
           !((mvin_scale_pixel_repeater.io.resp.valid && mvin_scale_pixel_repeater.io.resp.bits.last) || (mvin_scale_acc_out.valid && mvin_scale_acc_out.bits.last)) &&
           bio.write.ready
 
-        val localwrite = local_spad_dest && local_dest_addr.sp_bank() === i.U
+        val localwrite = local_stage_valid && local_stage_addr.sp_bank() === i.U
         bio.write.valid := exwrite || dmaread || zerowrite || localwrite
 
         when (exwrite) {
@@ -612,14 +635,14 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T, 
 
           zero_writer_pixel_repeater.io.resp.ready := true.B // TODO we combinationally couple valid and ready signals
         }.elsewhen (localwrite) {
-          bio.write.addr := local_dest_addr.sp_row()
-          bio.write.data := writeData.bits
+          bio.write.addr := local_stage_addr.sp_row()
+          bio.write.data := local_stage_data
           bio.write.mask := VecInit(Seq.fill(bio.write.mask.length)(true.B)).asUInt.asBools
-          write_issue_q.io.deq.ready := bio.write.ready && writeData.valid
 
           when (bio.write.fire) {
+            local_stage_fire := true.B
             io.dma.write.resp.valid := true.B
-            io.dma.write.resp.bits.cmd_id := write_issue_q.io.deq.bits.cmd_id
+            io.dma.write.resp.bits.cmd_id := local_stage_cmd_id
           }
         }.otherwise {
           bio.write.addr := DontCare

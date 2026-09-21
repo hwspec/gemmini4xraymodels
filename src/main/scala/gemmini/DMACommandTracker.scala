@@ -83,6 +83,8 @@ class DMACommandTracker[T <: Data](val nCmds: Int, val maxBytes: Int, tag_t: => 
 
   when (io.request_returned.fire) {
     val cmd_id = io.request_returned.bits.cmd_id
+  printf("request_returned: cmd_id=%d, bytes_left=%d, bytes_read=%d\n",  
+    cmd_id, cmds(cmd_id).bytes_left, io.request_returned.bits.bytes_read)  
     cmds(cmd_id).bytes_left := cmds(cmd_id).bytes_left - io.request_returned.bits.bytes_read
 
     assert(cmds(cmd_id).valid)
