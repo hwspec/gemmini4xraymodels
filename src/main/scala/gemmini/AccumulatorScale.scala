@@ -390,7 +390,6 @@ object AccumulatorScale {
   }
 
   def iexp[T <: Data](q: T, qln2: T, qln2_inv: T, qb: T, qc: T)(implicit ev: Arithmetic[T]): T = {
-    /*
     import ev._
 
     val zero = q.zero
@@ -407,7 +406,8 @@ object AccumulatorScale {
     val q_poly_iexp = qc.mac(qp_iexp + qb, qp_iexp + qb).withWidthOf(q)
     // we dont want a rounding shift
     //  TODO: z overflow
-    (q_poly_iexp.asUInt.do_>>(z_iexp_saturated.asUInt)).asTypeOf(q) */
+    (q_poly_iexp.asUInt.do_>>(z_iexp_saturated.asUInt)).asTypeOf(q)
+   /*
     import ev._
 
     val zero = q.zero
@@ -420,5 +420,6 @@ object AccumulatorScale {
     val q_poly = qc.mac(q_clipped + qb, q_clipped + qb).withWidthOf(q)
     val q_erf = (q_sign * q_poly).withWidthOf(q)
     (q * (q_erf + qc)).withWidthOf(q)
+    */
   }}
 
