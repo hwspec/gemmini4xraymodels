@@ -572,7 +572,7 @@ class LoopMatmulStC(block_size: Int, coreMaxAddrBits: Int, iterator_bitwidth: In
   val ln_cmd = Reg(UInt(iterator_bitwidth.W))
   val ln_stat_id = Reg(UInt(iterator_bitwidth.W))
 
-  val NORM_STAT_IDS = 2 // TODO magic number
+  val NORM_STAT_IDS = 8 // must match the Normalizer's num_stats (Scratchpad)
 
   val ln_norm_cmds = VecInit(VecInit(NormCmd.SUM, NormCmd.MEAN), VecInit(NormCmd.VARIANCE, NormCmd.INV_STDDEV),
     VecInit(NormCmd.RESET, NormCmd.RESET))
@@ -1205,7 +1205,11 @@ class LoopMatmul(block_size: Int, coreMaxAddrBits: Int, reservation_station_size
     loop_requesting_ldD.running := true.B
     loop_requesting_ldD.ldd_started := true.B
 
-    when (loop_requesting_ldD.c_dram_addr =/= 0.U) {
+    // Same rule as ex_c_addr_start / st_c_addr_start below, so that a
+    // spad_only loop with inc_acc_addr loads its D into the accumulator half
+    // it computes and stores from.
+    when (Mux(loop_requesting_ldD.spad_only, loop_requesting_ldD.inc_acc_addr,
+      loop_requesting_ldD.c_dram_addr =/= 0.U)) {
       ld_d_addr_start := floorAdd(ld_d_addr_start, (max_acc_addr / concurrent_loops).U, max_acc_addr.U)
     }
   }

@@ -54,7 +54,7 @@ object GemminiConfigs {
 
     // Reservation station entries
     reservation_station_entries_ld = 8,
-    reservation_station_entries_st = 4,
+    reservation_station_entries_st = 16,
     reservation_station_entries_ex = 16,
 
     // Ld/Ex/St instruction queue lengths
@@ -63,7 +63,7 @@ object GemminiConfigs {
     ex_queue_length = 8,
 
     // DMA options
-    max_in_flight_mem_reqs = 16,
+    max_in_flight_mem_reqs = 64,
 
     dma_maxbytes = 64,
     dma_buswidth = 128,
@@ -106,7 +106,7 @@ object GemminiConfigs {
 
         Mux(overflow, sat, rec_fn_to_in.io.out.asTypeOf(t))
       },
-      4, Float(8, 24), 4,
+      4, Float(8, 24), -1, // one pipelined scaler per column: a scaled mvin row per cycle
       identity = "1.0",
       c_str = "({float y = ROUND_NEAR_EVEN((x) * (scale)); y > INT8_MAX ? INT8_MAX : (y < INT8_MIN ? INT8_MIN : (elem_t)y);})"
     )),

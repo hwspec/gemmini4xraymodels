@@ -385,10 +385,24 @@ class StreamWriter[T <: Data: Arithmetic](nXacts: Int, beatBits: Int, maxBytes: 
 
     val req = Reg(new StreamWriteRequest(dataWidth, maxBytes))
 
-    // TODO use the same register to hold data_blocks and data_single_block, so that this Mux here is not necessary
+    // Two stages: the blocks of a row are gathered in data_blocks /
+    // data_single_block as they arrive (one request per cycle), and a complete
+    // row (the request with store_en) goes into row_q; the TileLink state
+    // machine below writes rows from row_q. So the next row's blocks are taken
+    // while the current row is still being written, instead of waiting for it.
     val data_blocks = Reg(Vec(maxBlocks, UInt((inputTypeRowBytes * 8).W)))
     val data_single_block = Reg(UInt(dataWidth.W)) // For data that's just one-block-wide
-    val data = Mux(req.block === 0.U, data_single_block, data_blocks.asUInt)
+    val rowDataBits = dataWidth max (maxBlocks * inputTypeRowBytes * 8)
+
+    class RowWrite extends Bundle {
+      val vaddr = UInt(coreMaxAddrBits.W)
+      val physical = Bool()
+      val len = UInt(log2Up((dataWidth/8 max maxBytes)+1).W)
+      val status = new MStatus
+      val data = UInt(rowDataBits.W)
+    }
+    val row_q = Module(new Queue(new RowWrite, 2))
+    val data = Reg(UInt(rowDataBits.W)) // the row being written
 
     val bytesSent = Reg(UInt((log2Ceil((dataBytes max maxBytes)+1) + 1).W))  // TODO this only needs to count up to (dataBytes/aligned_to), right?
     val bytesLeft = req.len - bytesSent
@@ -403,8 +417,10 @@ class StreamWriter[T <: Data: Arithmetic](nXacts: Int, beatBits: Int, maxBytes: 
     xactBusy := (xactBusy | xactBusy_add) & xactBusy_remove.asUInt
 
     val state_machine_ready_for_req = WireInit(state === s_idle)
-    io.req.ready := state_machine_ready_for_req
-    io.busy := xactBusy.orR || (state =/= s_idle)
+    // Blocks that only fill the gather registers are always taken; the last
+    // one of a row needs room in row_q.
+    io.req.ready := !io.req.bits.store_en || row_q.io.enq.ready
+    io.busy := xactBusy.orR || (state =/= s_idle) || row_q.io.deq.valid
 
     val vaddr = req.vaddr
 
@@ -592,7 +608,9 @@ class StreamWriter[T <: Data: Arithmetic](nXacts: Int, beatBits: Int, maxBytes: 
       }
     }
 
-    // Accepting requests to kick-start the state machine
+    // Gathering the blocks of a row, and queueing complete rows
+    row_q.io.enq.valid := false.B
+    row_q.io.enq.bits := DontCare
     when (io.req.fire) {
       val pooled = {
         val cols = dataWidth / inputType.getWidth
@@ -601,19 +619,37 @@ class StreamWriter[T <: Data: Arithmetic](nXacts: Int, beatBits: Int, maxBytes: 
         val m = v1.zip(v2)
         VecInit(m.zipWithIndex.map{case ((x, y), i) => if (i < block_cols) maxOf(x, y) else y}).asUInt
       }
+      val single = Mux(io.req.bits.pool_en, pooled, io.req.bits.data)
+      val blocks = WireInit(data_blocks)
+      blocks(io.req.bits.block) := io.req.bits.data
 
-      req := io.req.bits
-      req.len := io.req.bits.block * inputTypeRowBytes.U + io.req.bits.len
-
-      data_single_block := Mux(io.req.bits.pool_en, pooled, io.req.bits.data)
+      data_single_block := single
       data_blocks(io.req.bits.block) := io.req.bits.data
 
-      bytesSent := 0.U
-
-      state := Mux(io.req.bits.store_en, s_writing_new_block, s_idle)
+      row_q.io.enq.valid := io.req.bits.store_en
+      row_q.io.enq.bits.vaddr := io.req.bits.vaddr
+      row_q.io.enq.bits.physical := io.req.bits.physical
+      row_q.io.enq.bits.len := io.req.bits.block * inputTypeRowBytes.U + io.req.bits.len
+      row_q.io.enq.bits.status := io.req.bits.status
+      row_q.io.enq.bits.data := Mux(io.req.bits.block === 0.U, single, blocks.asUInt)
 
       assert(io.req.bits.len <= (block_cols * inputType.getWidth / 8).U || io.req.bits.block === 0.U, "DMA can't write multiple blocks to main memory when writing full accumulator output")
       assert(!io.req.bits.pool_en || io.req.bits.block === 0.U, "Can't pool with block-mvout")
+    }
+    assert(!row_q.io.enq.valid || row_q.io.enq.ready)
+
+    // The next row starts as soon as the state machine is free (in the same
+    // cycle as the previous row's last beat)
+    row_q.io.deq.ready := state_machine_ready_for_req
+    when (row_q.io.deq.fire) {
+      req := DontCare
+      req.vaddr := row_q.io.deq.bits.vaddr
+      req.physical := row_q.io.deq.bits.physical
+      req.len := row_q.io.deq.bits.len
+      req.status := row_q.io.deq.bits.status
+      data := row_q.io.deq.bits.data
+      bytesSent := 0.U
+      state := s_writing_new_block
     }
 
     // Performance counter

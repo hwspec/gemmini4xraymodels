@@ -289,7 +289,10 @@ class Normalizer[T <: Data, U <: Data](max_len: Int, num_reduce_lanes: Int, num_
     def waiting_for_lanes_to_drain =
       (cmd === NormCmd.MEAN && (state === get_sum || state === get_mean)) ||
         (cmd === NormCmd.INV_STDDEV && (state === get_sum || state === get_variance)) ||
-        (cmd === NormCmd.MAX && (state === get_max)) ||
+        // a MAX input leaves get_max after its last lane group (one cycle when a
+        // row block fits the lanes), and max_lanes always takes it, so only
+        // multi-group inputs hold off the next input
+        (cmd === NormCmd.MAX && (state === get_max) && vec_groups_left > 1.U) ||
         (cmd === NormCmd.INV_SUM_EXP && (state === get_sum))
   }
 
@@ -319,6 +322,15 @@ class Normalizer[T <: Data, U <: Data](max_len: Int, num_reduce_lanes: Int, num_
   // Lanes and functional units
   val lanes = Module(new AccumulationLanes(num_stats, acc_t, n_lanes, latency))
   val max_lanes = Module(new MaxLanes(num_stats, acc_t, n_lanes, latency)) // TODO: change latency?
+
+  // Lane inputs in flight per stat id: a stat's sum is final once its own are
+  // out, even while the lanes keep adding up other rows
+  val lanes_in_flight = RegInit(VecInit(Seq.fill(num_stats)(0.U(log2Up(latency + 2).W))))
+  for (id <- 0 until num_stats) {
+    val lane_in = lanes.io.ins.fire && lanes.io.ins.bits.stats_id === id.U
+    val lane_out = lanes.io.out.fire && lanes.io.out.bits.stats_id === id.U
+    lanes_in_flight(id) := lanes_in_flight(id) + lane_in.asUInt - lane_out.asUInt
+  }
 
   {
     // Lanes input
@@ -533,22 +545,17 @@ class Normalizer[T <: Data, U <: Data](max_len: Int, num_reduce_lanes: Int, num_
   }
 
 
-  val sum_exp_to_inv_id = MuxCase((num_stats-1).U,
-    stats.zipWithIndex.map { case (s,i) =>
-      (s.state === get_inv_sum_exp) -> i.U }
-  )
-  val sum_exp_to_inv = stats(sum_exp_to_inv_id).sum
-  val exp_divider_in = Wire(Decoupled(UInt(0.W)))
-  val exp_divider_out = Wire(Decoupled(scale_t.cloneType))
+  // One divider per stat id: the divider takes ~sigWidth cycles per row, and
+  // with a single shared one the rows of a softmax queued up behind it.
+  val exp_divider_in = Wire(Vec(num_stats, Decoupled(UInt(0.W))))
+  val exp_divider_out = Wire(Vec(num_stats, Decoupled(scale_t.cloneType)))
 
   scale_t match {
     case Float(expWidth, sigWidth, false) =>
 
-      exp_divider_in.bits := DontCare
-
       // We translate our integer to floating-point form so that we can use the hardfloat divider
       def in_to_float(x: SInt) = {
-        val in_to_rec_fn = Module(new INToRecFN(intWidth = sum_exp_to_inv.getWidth, expWidth, sigWidth))
+        val in_to_rec_fn = Module(new INToRecFN(intWidth = acc_t.getWidth, expWidth, sigWidth))
         in_to_rec_fn.io.signedIn := true.B
         in_to_rec_fn.io.in := x.asUInt
         in_to_rec_fn.io.roundingMode := consts.round_near_even // consts.round_near_maxMag
@@ -557,45 +564,39 @@ class Normalizer[T <: Data, U <: Data](max_len: Int, num_reduce_lanes: Int, num_
         in_to_rec_fn.io.out
       }
 
-      val self_rec = in_to_float(sum_exp_to_inv.asUInt.asSInt)
-      val one_rec = in_to_float(127.S) // softmax maximum is 127 for signed int8
+      val one_rec = in_to_float(127.S(acc_t.getWidth.W)) // softmax maximum is 127 for signed int8
 
-      // Instantiate the hardloat divider
-      val divider = Module(new DivSqrtRecFN_small(expWidth, sigWidth, 16))
+      for (id <- 0 until num_stats) {
+        val self_rec = in_to_float(stats(id).sum.asUInt.asSInt)
 
-      exp_divider_in.ready := divider.io.inReady
-      divider.io.inValid := exp_divider_in.valid
-      divider.io.sqrtOp := false.B
-      divider.io.a := one_rec
-      divider.io.b := self_rec
-      divider.io.roundingMode := consts.round_near_even
-      divider.io.detectTininess := consts.tininess_afterRounding
+        // Instantiate the hardloat divider
+        val divider = Module(new DivSqrtRecFN_small(expWidth, sigWidth, 16))
 
-      exp_divider_out.valid := divider.io.outValid_div
-      exp_divider_out.bits := fNFromRecFN(expWidth, sigWidth, divider.io.out).asTypeOf(scale_t)
+        exp_divider_in(id).bits := DontCare
+        exp_divider_in(id).ready := divider.io.inReady
+        divider.io.inValid := exp_divider_in(id).valid
+        divider.io.sqrtOp := false.B
+        divider.io.a := one_rec
+        divider.io.b := self_rec
+        divider.io.roundingMode := consts.round_near_even
+        divider.io.detectTininess := consts.tininess_afterRounding
+
+        exp_divider_out(id).valid := divider.io.outValid_div
+        exp_divider_out(id).bits := fNFromRecFN(expWidth, sigWidth, divider.io.out).asTypeOf(scale_t)
+      }
   }
 
+  for (id <- 0 until num_stats) {
+    val stat = stats(id)
 
-  {
     // Divider input
-    val stat = stats(sum_exp_to_inv_id)
+    exp_divider_in(id).valid := (stat.state === get_inv_sum_exp) && lanes_in_flight(id) === 0.U
 
-    exp_divider_in.valid := (stat.state === get_inv_sum_exp) && !lanes.io.busy
-    exp_divider_in.bits := sum_exp_to_inv.asUInt
-  }
-
-  {
     // Divider output
-    val waiting_for_divide_id = MuxCase((num_stats-1).U,
-      stats.zipWithIndex.map { case (s,i) =>
-        (s.state === waiting_for_inv_sum_exp) -> i.U }
-    )
-    val stat = stats(waiting_for_divide_id)
-
-    exp_divider_out.ready := stat.state === waiting_for_inv_sum_exp
+    exp_divider_out(id).ready := stat.state === waiting_for_inv_sum_exp
 
     when (stat.state === waiting_for_inv_sum_exp) {
-      stat.inv_sum_exp := exp_divider_out.bits.asTypeOf(stat.inv_sum_exp)
+      stat.inv_sum_exp := exp_divider_out(id).bits.asTypeOf(stat.inv_sum_exp)
     }
   }
 
@@ -613,7 +614,10 @@ class Normalizer[T <: Data, U <: Data](max_len: Int, num_reduce_lanes: Int, num_
     val ins = inv_sum_exp_scale_mul_pipe.io.ins
     ins.bits.x := stats(inv_sum_exp_to_scale_id).inv_sum_exp.asTypeOf(scale_t)
     ins.bits.y := stats(inv_sum_exp_to_scale_id).req.acc_read_resp.scale
-    ins.valid := stat.state === get_scaled_inv_sum_exp
+    // One multiply in flight at a time, so its result belongs to the only stat
+    // waiting for it (the dividers can finish several rows close together).
+    ins.valid := stat.state === get_scaled_inv_sum_exp &&
+      !stats.map(_.state === waiting_for_scaled_inv_sum_exp).reduce(_ || _)
   }
 
   {
@@ -714,10 +718,10 @@ class Normalizer[T <: Data, U <: Data](max_len: Int, num_reduce_lanes: Int, num_
       next_state := Mux(inv_stddev_scale_mul_pipe.io.out.fire, idle, state)
       done := inv_stddev_scale_mul_pipe.io.out.fire
     }.elsewhen(state === get_inv_sum_exp) {
-      next_state := Mux(exp_divider_in.fire && sum_exp_to_inv_id === id.U, state.next, state)
+      next_state := Mux(exp_divider_in(id).fire, state.next, state)
       done := false.B
     }.elsewhen(state === waiting_for_inv_sum_exp) {
-      next_state := Mux(exp_divider_out.fire, state.next, state)
+      next_state := Mux(exp_divider_out(id).fire, state.next, state)
       done := false.B
     }.elsewhen(state === get_scaled_inv_sum_exp) {
       next_state := Mux(inv_sum_exp_scale_mul_pipe.io.ins.fire && inv_sum_exp_to_scale_id === id.U, state.next, state)

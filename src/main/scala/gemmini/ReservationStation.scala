@@ -374,8 +374,11 @@ class ReservationStation[T <: Data : Arithmetic, U <: Data, V <: Data](config: G
         )
       })
 
-      // new_entry.deps_st := VecInit(entries_st.map { e => e.valid && !e.bits.issued }) // same q
-      new_entry.deps_st := VecInit(entries_st.map { e => e.valid }) // same q
+      // Same q: stores (mvout and mvout_spad alike) issue in order and the
+      // StoreController runs them in order, so a store waits only for the
+      // unissued ones before it. Loads / computes still wait for a store until
+      // it completes (their deps_st, incl. a mvout_spad's accumulator source).
+      new_entry.deps_st := VecInit(entries_st.map { e => e.valid && !e.bits.issued })
     }
 
     new_entry.allocated_at := instructions_allocated
@@ -467,7 +470,11 @@ class ReservationStation[T <: Data : Arithmetic, U <: Data, V <: Data](config: G
         entries_type_.zipWithIndex.foreach { case (e, i) =>
           val deps_type = if (q == ldq) e.bits.deps_ld else if (q == exq) e.bits.deps_ex else e.bits.deps_st
           if ((q == q_) && (q_ != stq)) {
-            deps_type(issue_id) := false.B // TODO(richard): normal mvouts should not be blocked until complete
+            deps_type(issue_id) := false.B
+          } else if ((q == q_) && (q_ == stq)) {
+            // stores are not blocked until the ones before them complete (see
+            // deps_st at allocation)
+            deps_type(issue_id) := false.B
           } else {
             when (issue_entry.bits.complete_on_issue) {
               deps_type(issue_id) := false.B
@@ -525,8 +532,15 @@ class ReservationStation[T <: Data : Arithmetic, U <: Data, V <: Data](config: G
 
   // Explicitly mark "opb" in all ld/st queues entries as being invalid.
   // This helps us to reduce the total reservation table area
-  Seq(entries_ld, entries_st).foreach { entries_type =>
-    entries_type.foreach { e =>
+  entries_ld.foreach { e =>
+    e.bits.opb.valid := false.B
+    e.bits.opb.bits := DontCare
+  }
+  // ...except in a mvout_spad's entry, where opb is the accumulator rows it
+  // reads (opa is its scratchpad destination): the ld / ex dependency checks
+  // use it for their WAR hazards on those rows.
+  entries_st.foreach { e =>
+    when (e.bits.cmd.cmd.inst.funct =/= STORE_SPAD_CMD) {
       e.bits.opb.valid := false.B
       e.bits.opb.bits := DontCare
     }
